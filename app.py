@@ -1440,7 +1440,12 @@ def main():
                     return 'background-color: #fee2e2'
                 return ''
 
-            styled = audit_display.style.applymap(
+            # Pandas 2.1+ renamed Styler.applymap to Styler.map.
+            # Use whichever exists so the app works on both old and new pandas.
+            _style_method = getattr(
+                audit_display.style, "map", audit_display.style.applymap
+            )
+            styled = _style_method(
                 color_action, subset=['What happened']
             )
             st.dataframe(styled, use_container_width=True, hide_index=True)
