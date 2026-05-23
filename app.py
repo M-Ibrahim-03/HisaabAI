@@ -90,6 +90,8 @@ def verify_login(username: str, password: str):
 def register_user(username: str, password: str) -> bool:
     """
     Inserts a new user into the users table.
+    Also seeds the default categories for that user so their dashboard
+    works out of the box.
     Returns True on success, False if username already exists.
     """
     conn = get_db_connection()
@@ -100,6 +102,21 @@ def register_user(username: str, password: str) -> bool:
         cursor.execute(
             "INSERT INTO users (username, pass_hash) VALUES (%s, %s)",
             (username, hash_password(password))
+        )
+        new_user_id = cursor.lastrowid
+
+        # Seed default categories for this new user so they don't start empty
+        default_cats = [
+            ('Food',          6000.00),
+            ('Transport',     3000.00),
+            ('Subscriptions', 2000.00),
+            ('Shopping',      5000.00),
+            ('Medical',       4000.00),
+            ('Other',         5000.00),
+        ]
+        cursor.executemany(
+            "INSERT INTO categories (user_id, category_name, budget_limit) VALUES (%s, %s, %s)",
+            [(new_user_id, name, limit) for name, limit in default_cats]
         )
         conn.commit()
         return True
@@ -180,10 +197,10 @@ def check_and_create_alert(user_id, category_id, exp_date):
         )
         total = cursor.fetchone()[0] or 0
 
-        # Get budget limit for this category
+        # Get budget limit for this category (scoped to this user)
         cursor.execute(
-            "SELECT budget_limit, category_name FROM categories WHERE category_id = %s",
-            (category_id,)
+            "SELECT budget_limit, category_name FROM categories WHERE category_id = %s AND user_id = %s",
+            (category_id, user_id)
         )
         row = cursor.fetchone()
         if not row:
@@ -256,31 +273,32 @@ def mark_alerts_read(user_id):
 # SECTION 5: CRUD OPERATIONS
 # ============================================================
 
-def fetch_categories():
-    """Returns all categories as a list of (id, name, budget_limit)."""
+def fetch_categories(user_id):
+    """Returns categories for a specific user as a list of (id, name, budget_limit)."""
     conn = get_db_connection()
     if not conn:
         return []
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT category_id, category_name, budget_limit FROM categories"
+            "SELECT category_id, category_name, budget_limit FROM categories WHERE user_id = %s ORDER BY category_id",
+            (user_id,)
         )
         return cursor.fetchall()
     finally:
         conn.close()
 
 
-def add_category(category_name, budget_limit):
-    """Inserts a new category into the categories table."""
+def add_category(user_id, category_name, budget_limit):
+    """Inserts a new category scoped to one user."""
     conn = get_db_connection()
     if not conn:
         return False
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO categories (category_name, budget_limit) VALUES (%s, %s)",
-            (category_name, budget_limit)
+            "INSERT INTO categories (user_id, category_name, budget_limit) VALUES (%s, %s, %s)",
+            (user_id, category_name, budget_limit)
         )
         conn.commit()
         return True
@@ -291,16 +309,16 @@ def add_category(category_name, budget_limit):
         conn.close()
 
 
-def update_category_budget(category_id, new_limit):
-    """Updates the budget limit for an existing category."""
+def update_category_budget(user_id, category_id, new_limit):
+    """Updates the budget limit for one user's category."""
     conn = get_db_connection()
     if not conn:
         return False
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE categories SET budget_limit = %s WHERE category_id = %s",
-            (new_limit, category_id)
+            "UPDATE categories SET budget_limit = %s WHERE category_id = %s AND user_id = %s",
+            (new_limit, category_id, user_id)
         )
         conn.commit()
         return True
@@ -879,7 +897,7 @@ def main():
     USER_ID = st.session_state.user_id
 
     # ── Load categories from DB ───────────────────────────
-    categories_raw = fetch_categories()
+    categories_raw = fetch_categories(USER_ID)
     # categories_raw = [(id, name, budget), ...]
     cat_id_map   = {name: cid  for cid, name, _ in categories_raw}
     cat_name_map = {cid:  name for cid, name, _ in categories_raw}
@@ -1471,7 +1489,7 @@ def main():
 
             if update_b:
                 target_cid = cat_id_map[cat_to_update]
-                if update_category_budget(target_cid, new_budget):
+                if update_category_budget(USER_ID, target_cid, new_budget):
                     st.success(f"Budget limit for {cat_to_update} updated to ₹{new_budget:,.2f}!")
                     st.session_state.data_version += 1
                     st.rerun()
@@ -1489,7 +1507,7 @@ def main():
                 elif new_cat_name in cat_names:
                     st.error(f"Category '{new_cat_name}' already exists.")
                 else:
-                    if add_category(new_cat_name, initial_budget):
+                    if add_category(USER_ID, new_cat_name, initial_budget):
                         st.success(f"New category '{new_cat_name}' created successfully!")
                         st.session_state.data_version += 1
                         st.rerun()

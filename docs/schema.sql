@@ -5,7 +5,7 @@
 -- Tables are in 3rd Normal Form. See docs/normalization.md for proof.
 -- =====================================================================
 
-USE hisaabai_db;
+USE spendwise_db;
 
 -- ---------------------------------------------------------------------
 -- 1. DROP existing objects (child tables first due to foreign keys)
@@ -28,12 +28,17 @@ CREATE TABLE users (
 ) AUTO_ID_CACHE 1;
 
 -- ---------------------------------------------------------------------
--- 3. CATEGORIES — Spending categories with monthly budget limits
+-- 3. CATEGORIES — Per-user spending categories with monthly budget limits
+--    Each user owns their own list, so different users can have
+--    different categories and different limits independently.
 -- ---------------------------------------------------------------------
 CREATE TABLE categories (
     category_id   INT AUTO_INCREMENT PRIMARY KEY,
+    user_id       INT NOT NULL,
     category_name VARCHAR(50) NOT NULL,
-    budget_limit  DECIMAL(10,2) DEFAULT 5000.00
+    budget_limit  DECIMAL(10,2) DEFAULT 5000.00,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    UNIQUE KEY uniq_user_cat (user_id, category_name)
 ) AUTO_ID_CACHE 1;
 
 -- ---------------------------------------------------------------------
@@ -107,11 +112,25 @@ FROM expenses
 GROUP BY user_id, DATE_FORMAT(exp_date, '%Y-%m');
 
 -- ---------------------------------------------------------------------
--- 8a. STORED PROCEDURE — GetMonthlyTotal
---     Returns total spending for a given user in a given month.
---     Demonstrates parameterized server-side logic.
---     Usage: CALL GetMonthlyTotal(1, 2026, 4);
+-- 8a. STORED PROCEDURES & TRIGGER — DOCUMENTATION ONLY
+--
+--   ⚠️  TiDB Serverless (free tier) does NOT support CREATE PROCEDURE
+--       or CREATE TRIGGER. Running them returns:
+--           "Unsupported type *resolve.NodeW"
+--
+--   The application replicates this functionality in Python:
+--     • check_and_create_alert()   replaces an AFTER INSERT trigger
+--     • log_audit()                replaces an AFTER DELETE trigger
+--     • fetch_monthly_summary()    replaces a stored procedure call
+--
+--   The blocks below are kept as DOCUMENTATION for the project report
+--   and would run unchanged on standard MySQL 8 / MariaDB. To enable
+--   them on a self-hosted MySQL, uncomment everything between the
+--   /* and */ markers.
 -- ---------------------------------------------------------------------
+/*
+
+-- STORED PROCEDURE: GetMonthlyTotal(user, year, month)
 DROP PROCEDURE IF EXISTS GetMonthlyTotal;
 DELIMITER $$
 CREATE PROCEDURE GetMonthlyTotal(
@@ -135,12 +154,8 @@ BEGIN
 END$$
 DELIMITER ;
 
--- ---------------------------------------------------------------------
--- 8b. STORED PROCEDURE — GetCategoryBudgetStatus
---     Returns budget status for every category for a user in a month.
---     Shows: spent, budget, remaining, percent used.
---     Usage: CALL GetCategoryBudgetStatus(1, 2026, 4);
--- ---------------------------------------------------------------------
+
+-- STORED PROCEDURE: GetCategoryBudgetStatus(user, year, month)
 DROP PROCEDURE IF EXISTS GetCategoryBudgetStatus;
 DELIMITER $$
 CREATE PROCEDURE GetCategoryBudgetStatus(
@@ -152,8 +167,8 @@ BEGIN
     SELECT
         c.category_name,
         c.budget_limit,
-        IFNULL(SUM(e.amount), 0)                            AS spent,
-        c.budget_limit - IFNULL(SUM(e.amount), 0)           AS remaining,
+        IFNULL(SUM(e.amount), 0)                                  AS spent,
+        c.budget_limit - IFNULL(SUM(e.amount), 0)                 AS remaining,
         ROUND(IFNULL(SUM(e.amount), 0) / c.budget_limit * 100, 1) AS pct_used
     FROM categories c
     LEFT JOIN expenses e
@@ -166,12 +181,8 @@ BEGIN
 END$$
 DELIMITER ;
 
--- ---------------------------------------------------------------------
--- 8c. TRIGGER — Auto-log every expense deletion
---     Database-level safety net: even if a future client forgets to
---     write to audit_log, this trigger guarantees the action is recorded.
---     Demonstrates DDL trigger syntax with NEW/OLD row references.
--- ---------------------------------------------------------------------
+
+-- TRIGGER: auto-log every expense deletion
 DROP TRIGGER IF EXISTS trg_audit_expense_delete;
 DELIMITER $$
 CREATE TRIGGER trg_audit_expense_delete
@@ -186,16 +197,19 @@ BEGIN
 END$$
 DELIMITER ;
 
+*/
+
 -- ---------------------------------------------------------------------
--- 9. SEED — Default categories
+-- 9. SEED — Default categories for the demo user (user_id = 1)
+--    Each new user that signs up via the app gets the same defaults.
 -- ---------------------------------------------------------------------
-INSERT INTO categories (category_name, budget_limit) VALUES
-('Food',          6000.00),
-('Transport',     3000.00),
-('Subscriptions', 2000.00),
-('Shopping',      5000.00),
-('Medical',       4000.00),
-('Other',         5000.00);
+INSERT INTO categories (user_id, category_name, budget_limit) VALUES
+(1, 'Food',          6000.00),
+(1, 'Transport',     3000.00),
+(1, 'Subscriptions', 2000.00),
+(1, 'Shopping',      5000.00),
+(1, 'Medical',       4000.00),
+(1, 'Other',         5000.00);
 
 -- ---------------------------------------------------------------------
 -- 10. SEED — Demo user (username: demo, password: demo123)
