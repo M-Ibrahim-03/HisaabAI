@@ -432,8 +432,13 @@ def update_expense(expense_id, user_id, category_id,
             (expense_id, user_id)
         )
         row = cursor.fetchone()
-        old_amount      = row[0] if row else None
-        old_description = row[1] if row else None
+
+        # Bail out cleanly if the expense doesn't exist or doesn't belong to this user
+        if row is None:
+            return False
+
+        old_amount      = row[0]
+        old_description = row[1]
 
         # Perform the update
         cursor.execute(
@@ -480,8 +485,14 @@ def delete_expense(expense_id, user_id):
             (expense_id, user_id)
         )
         row = cursor.fetchone()
-        old_amount      = row[0] if row else None
-        old_description = row[1] if row else None
+
+        # If the row doesn't exist or doesn't belong to this user,
+        # don't delete and don't log a phantom audit entry.
+        if row is None:
+            return False
+
+        old_amount      = row[0]
+        old_description = row[1]
 
         cursor.execute(
             "DELETE FROM expenses WHERE id = %s AND user_id = %s",
