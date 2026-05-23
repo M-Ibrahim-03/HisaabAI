@@ -200,110 +200,129 @@ DELIMITER ;
 */
 
 -- ---------------------------------------------------------------------
--- 9. SEED — Default categories for the demo user (user_id = 1)
---    Each new user that signs up via the app gets the same defaults.
--- ---------------------------------------------------------------------
-INSERT INTO categories (user_id, category_name, budget_limit) VALUES
-(1, 'Food',          6000.00),
-(1, 'Transport',     3000.00),
-(1, 'Subscriptions', 2000.00),
-(1, 'Shopping',      5000.00),
-(1, 'Medical',       4000.00),
-(1, 'Other',         5000.00);
-
--- ---------------------------------------------------------------------
--- 10. SEED — Demo user (username: demo, password: demo123)
---     Password below is the SHA-256 hex digest of "demo123"
+-- 9. SEED — Demo user (username: demo, password: demo123)
+--    Password is the SHA-256 hex digest of "demo123".
 -- ---------------------------------------------------------------------
 INSERT INTO users (username, pass_hash) VALUES
 ('demo', 'd3ad9315b7be5dd53b31a273b3b3aba5defe700808305aa16a3062b76658a791');
 
 -- ---------------------------------------------------------------------
--- 11. SEED — Sample expenses across 8 months
+-- 10. SEED — Default categories for the demo user
+--     Uses INSERT...SELECT with a derived table so we don't depend on
+--     hardcoded IDs (TiDB's AUTO_INCREMENT cache may assign any number).
+--
+--     Every NEW user who signs up via the app gets these same defaults
+--     automatically — see register_user() in app.py.
+-- ---------------------------------------------------------------------
+INSERT INTO categories (user_id, category_name, budget_limit)
+SELECT u.user_id, defaults.category_name, defaults.budget_limit
+FROM users u
+JOIN (
+    SELECT 'Food'          AS category_name, 6000.00 AS budget_limit UNION ALL
+    SELECT 'Transport',     3000.00 UNION ALL
+    SELECT 'Subscriptions', 2000.00 UNION ALL
+    SELECT 'Shopping',      5000.00 UNION ALL
+    SELECT 'Medical',       4000.00 UNION ALL
+    SELECT 'Other',         5000.00
+) AS defaults
+WHERE u.username = 'demo';
+
+-- ---------------------------------------------------------------------
+-- 11. SEED — Sample expenses for the demo user across 8 months
 --     Designed to showcase the ML forecast and pattern detection:
 --       • Recurring monthly: Subscriptions (₹299), Electricity bill
 --       • Weekly groceries (Food)
 --       • Steady-but-rising Transport
 --       • Occasional Medical and Shopping spikes
+--
+--     Joins against the demo user + their categories by NAME so we
+--     never reference an ID directly. Reads like plain English:
+--     "for user 'demo', in their 'Food' category, on Sep 2 2025, ₹480"
 -- ---------------------------------------------------------------------
-INSERT INTO expenses (user_id, category_id, exp_date, amount, description) VALUES
--- ===== September 2025 =====
-(1, 1, '2025-09-02',  480.00, 'Groceries'),
-(1, 2, '2025-09-04',  170.00, 'Fuel'),
-(1, 3, '2025-09-09',  299.00, 'Netflix + Spotify'),
-(1, 1, '2025-09-12',  520.00, 'Groceries'),
-(1, 6, '2025-09-15',  950.00, 'Electricity bill'),
-(1, 2, '2025-09-18',  140.00, 'Bus pass'),
-(1, 4, '2025-09-22',  600.00, 'T-shirts'),
-(1, 1, '2025-09-26',  430.00, 'Groceries'),
-(1, 5, '2025-09-29',  350.00, 'Pharmacy'),
+INSERT INTO expenses (user_id, category_id, exp_date, amount, description)
+SELECT u.user_id, c.category_id, seed.exp_date, seed.amount, seed.description
+FROM users u
+JOIN categories c ON c.user_id = u.user_id
+JOIN (
+    -- ===== September 2025 =====
+    SELECT 'Food'          AS cat, DATE '2025-09-02' AS exp_date,  480.00 AS amount, 'Groceries'           AS description UNION ALL
+    SELECT 'Transport',     DATE '2025-09-04',  170.00, 'Fuel'               UNION ALL
+    SELECT 'Subscriptions', DATE '2025-09-09',  299.00, 'Netflix + Spotify'  UNION ALL
+    SELECT 'Food',          DATE '2025-09-12',  520.00, 'Groceries'          UNION ALL
+    SELECT 'Other',         DATE '2025-09-15',  950.00, 'Electricity bill'   UNION ALL
+    SELECT 'Transport',     DATE '2025-09-18',  140.00, 'Bus pass'           UNION ALL
+    SELECT 'Shopping',      DATE '2025-09-22',  600.00, 'T-shirts'           UNION ALL
+    SELECT 'Food',          DATE '2025-09-26',  430.00, 'Groceries'          UNION ALL
+    SELECT 'Medical',       DATE '2025-09-29',  350.00, 'Pharmacy'           UNION ALL
 
--- ===== October 2025 =====
-(1, 1, '2025-10-03',  500.00, 'Groceries'),
-(1, 2, '2025-10-06',  180.00, 'Fuel'),
-(1, 3, '2025-10-09',  299.00, 'Netflix + Spotify'),
-(1, 6, '2025-10-13', 1000.00, 'Electricity bill'),
-(1, 1, '2025-10-15',  470.00, 'Groceries'),
-(1, 4, '2025-10-18',  900.00, 'Diwali shopping'),
-(1, 2, '2025-10-21',  150.00, 'Bus pass'),
-(1, 1, '2025-10-25',  550.00, 'Groceries'),
-(1, 4, '2025-10-28', 1500.00, 'Festive clothes'),
+    -- ===== October 2025 =====
+    SELECT 'Food',          DATE '2025-10-03',  500.00, 'Groceries'          UNION ALL
+    SELECT 'Transport',     DATE '2025-10-06',  180.00, 'Fuel'               UNION ALL
+    SELECT 'Subscriptions', DATE '2025-10-09',  299.00, 'Netflix + Spotify'  UNION ALL
+    SELECT 'Other',         DATE '2025-10-13', 1000.00, 'Electricity bill'   UNION ALL
+    SELECT 'Food',          DATE '2025-10-15',  470.00, 'Groceries'          UNION ALL
+    SELECT 'Shopping',      DATE '2025-10-18',  900.00, 'Diwali shopping'    UNION ALL
+    SELECT 'Transport',     DATE '2025-10-21',  150.00, 'Bus pass'           UNION ALL
+    SELECT 'Food',          DATE '2025-10-25',  550.00, 'Groceries'          UNION ALL
+    SELECT 'Shopping',      DATE '2025-10-28', 1500.00, 'Festive clothes'    UNION ALL
 
--- ===== November 2025 =====
-(1, 1, '2025-11-02',  490.00, 'Groceries'),
-(1, 2, '2025-11-05',  195.00, 'Fuel'),
-(1, 3, '2025-11-09',  299.00, 'Subscriptions'),
-(1, 6, '2025-11-14', 1050.00, 'Electricity bill'),
-(1, 1, '2025-11-16',  500.00, 'Groceries'),
-(1, 2, '2025-11-20',  160.00, 'Bus pass'),
-(1, 5, '2025-11-23',  700.00, 'Doctor visit + meds'),
-(1, 1, '2025-11-27',  460.00, 'Groceries'),
+    -- ===== November 2025 =====
+    SELECT 'Food',          DATE '2025-11-02',  490.00, 'Groceries'          UNION ALL
+    SELECT 'Transport',     DATE '2025-11-05',  195.00, 'Fuel'               UNION ALL
+    SELECT 'Subscriptions', DATE '2025-11-09',  299.00, 'Subscriptions'      UNION ALL
+    SELECT 'Other',         DATE '2025-11-14', 1050.00, 'Electricity bill'   UNION ALL
+    SELECT 'Food',          DATE '2025-11-16',  500.00, 'Groceries'          UNION ALL
+    SELECT 'Transport',     DATE '2025-11-20',  160.00, 'Bus pass'           UNION ALL
+    SELECT 'Medical',       DATE '2025-11-23',  700.00, 'Doctor visit + meds' UNION ALL
+    SELECT 'Food',          DATE '2025-11-27',  460.00, 'Groceries'          UNION ALL
 
--- ===== December 2025 =====
-(1, 1, '2025-12-02',  540.00, 'Groceries'),
-(1, 2, '2025-12-05',  200.00, 'Fuel'),
-(1, 3, '2025-12-09',  299.00, 'Subscriptions'),
-(1, 6, '2025-12-13', 1100.00, 'Electricity bill'),
-(1, 1, '2025-12-15',  510.00, 'Groceries'),
-(1, 4, '2025-12-19', 1800.00, 'Christmas gifts'),
-(1, 2, '2025-12-22',  170.00, 'Cab'),
-(1, 1, '2025-12-27',  480.00, 'Groceries'),
-(1, 6, '2025-12-30',  450.00, 'Internet recharge'),
+    -- ===== December 2025 =====
+    SELECT 'Food',          DATE '2025-12-02',  540.00, 'Groceries'          UNION ALL
+    SELECT 'Transport',     DATE '2025-12-05',  200.00, 'Fuel'               UNION ALL
+    SELECT 'Subscriptions', DATE '2025-12-09',  299.00, 'Subscriptions'      UNION ALL
+    SELECT 'Other',         DATE '2025-12-13', 1100.00, 'Electricity bill'   UNION ALL
+    SELECT 'Food',          DATE '2025-12-15',  510.00, 'Groceries'          UNION ALL
+    SELECT 'Shopping',      DATE '2025-12-19', 1800.00, 'Christmas gifts'    UNION ALL
+    SELECT 'Transport',     DATE '2025-12-22',  170.00, 'Cab'                UNION ALL
+    SELECT 'Food',          DATE '2025-12-27',  480.00, 'Groceries'          UNION ALL
+    SELECT 'Other',         DATE '2025-12-30',  450.00, 'Internet recharge'  UNION ALL
 
--- ===== January 2026 =====
-(1, 1, '2026-01-03',  500.00, 'Groceries'),
-(1, 2, '2026-01-06',  190.00, 'Fuel'),
-(1, 3, '2026-01-09',  299.00, 'Subscriptions'),
-(1, 6, '2026-01-13', 1080.00, 'Electricity bill'),
-(1, 1, '2026-01-15',  470.00, 'Groceries'),
-(1, 5, '2026-01-18',  400.00, 'Pharmacy'),
-(1, 2, '2026-01-22',  155.00, 'Bus pass'),
-(1, 1, '2026-01-26',  520.00, 'Groceries'),
-(1, 4, '2026-01-29',  650.00, 'Shoes'),
+    -- ===== January 2026 =====
+    SELECT 'Food',          DATE '2026-01-03',  500.00, 'Groceries'          UNION ALL
+    SELECT 'Transport',     DATE '2026-01-06',  190.00, 'Fuel'               UNION ALL
+    SELECT 'Subscriptions', DATE '2026-01-09',  299.00, 'Subscriptions'      UNION ALL
+    SELECT 'Other',         DATE '2026-01-13', 1080.00, 'Electricity bill'   UNION ALL
+    SELECT 'Food',          DATE '2026-01-15',  470.00, 'Groceries'          UNION ALL
+    SELECT 'Medical',       DATE '2026-01-18',  400.00, 'Pharmacy'           UNION ALL
+    SELECT 'Transport',     DATE '2026-01-22',  155.00, 'Bus pass'           UNION ALL
+    SELECT 'Food',          DATE '2026-01-26',  520.00, 'Groceries'          UNION ALL
+    SELECT 'Shopping',      DATE '2026-01-29',  650.00, 'Shoes'              UNION ALL
 
--- ===== February 2026 =====
-(1, 1, '2026-02-03',  520.00, 'Weekly groceries'),
-(1, 2, '2026-02-07',  200.00, 'Fuel'),
-(1, 3, '2026-02-10',  299.00, 'Netflix + Spotify'),
-(1, 1, '2026-02-14',  450.00, 'Groceries'),
-(1, 6, '2026-02-18', 1200.00, 'Electricity bill'),
-(1, 2, '2026-02-22',  150.00, 'Bus pass'),
-(1, 4, '2026-02-26',  800.00, 'Clothes'),
+    -- ===== February 2026 =====
+    SELECT 'Food',          DATE '2026-02-03',  520.00, 'Weekly groceries'   UNION ALL
+    SELECT 'Transport',     DATE '2026-02-07',  200.00, 'Fuel'               UNION ALL
+    SELECT 'Subscriptions', DATE '2026-02-10',  299.00, 'Netflix + Spotify'  UNION ALL
+    SELECT 'Food',          DATE '2026-02-14',  450.00, 'Groceries'          UNION ALL
+    SELECT 'Other',         DATE '2026-02-18', 1200.00, 'Electricity bill'   UNION ALL
+    SELECT 'Transport',     DATE '2026-02-22',  150.00, 'Bus pass'           UNION ALL
+    SELECT 'Shopping',      DATE '2026-02-26',  800.00, 'Clothes'            UNION ALL
 
--- ===== March 2026 =====
-(1, 1, '2026-03-02',  600.00, 'Groceries'),
-(1, 2, '2026-03-06',  210.00, 'Fuel'),
-(1, 3, '2026-03-10',  299.00, 'Subscriptions'),
-(1, 5, '2026-03-14',  500.00, 'Doctor visit'),
-(1, 6, '2026-03-18', 1100.00, 'Electricity bill'),
-(1, 1, '2026-03-22',  480.00, 'Groceries'),
-(1, 4, '2026-03-28', 1200.00, 'Shoes + Bag'),
+    -- ===== March 2026 =====
+    SELECT 'Food',          DATE '2026-03-02',  600.00, 'Groceries'          UNION ALL
+    SELECT 'Transport',     DATE '2026-03-06',  210.00, 'Fuel'               UNION ALL
+    SELECT 'Subscriptions', DATE '2026-03-10',  299.00, 'Subscriptions'      UNION ALL
+    SELECT 'Medical',       DATE '2026-03-14',  500.00, 'Doctor visit'       UNION ALL
+    SELECT 'Other',         DATE '2026-03-18', 1100.00, 'Electricity bill'   UNION ALL
+    SELECT 'Food',          DATE '2026-03-22',  480.00, 'Groceries'          UNION ALL
+    SELECT 'Shopping',      DATE '2026-03-28', 1200.00, 'Shoes + Bag'        UNION ALL
 
--- ===== April 2026 =====
-(1, 1, '2026-04-01',  550.00, 'Groceries'),
-(1, 2, '2026-04-05',  190.00, 'Fuel'),
-(1, 3, '2026-04-09',  299.00, 'Subscriptions'),
-(1, 6, '2026-04-13', 1300.00, 'Electricity bill'),
-(1, 1, '2026-04-17',  420.00, 'Groceries'),
-(1, 5, '2026-04-21',  800.00, 'Medical checkup'),
-(1, 4, '2026-04-25',  650.00, 'Shopping');
+    -- ===== April 2026 =====
+    SELECT 'Food',          DATE '2026-04-01',  550.00, 'Groceries'          UNION ALL
+    SELECT 'Transport',     DATE '2026-04-05',  190.00, 'Fuel'               UNION ALL
+    SELECT 'Subscriptions', DATE '2026-04-09',  299.00, 'Subscriptions'      UNION ALL
+    SELECT 'Other',         DATE '2026-04-13', 1300.00, 'Electricity bill'   UNION ALL
+    SELECT 'Food',          DATE '2026-04-17',  420.00, 'Groceries'          UNION ALL
+    SELECT 'Medical',       DATE '2026-04-21',  800.00, 'Medical checkup'    UNION ALL
+    SELECT 'Shopping',      DATE '2026-04-25',  650.00, 'Shopping'
+) AS seed ON c.category_name = seed.cat
+WHERE u.username = 'demo';
